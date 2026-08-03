@@ -1,0 +1,44 @@
+version: "3.9"
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: commerce_agent
+      POSTGRES_USER: store_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes: [pgdata:/var/lib/postgresql/data]
+    ports: ["127.0.0.1:5432:5432"]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U store_admin -d commerce_agent"], interval: 5s, timeout: 5s, retries: 5}
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes: [redis_data:/data]
+    healthcheck: {test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 3s, retries: 5}
+  commerce-agent:
+    build: {context: .., dockerfile: docker/Dockerfile}
+    restart: unless-stopped
+    depends_on: {postgres: {condition: service_healthy}, redis: {condition: service_healthy}}
+    environment:
+      DATABASE_URL: postgresql+asyncpg://store_admin:${DB_PASSWORD}@postgres:5432/commerce_agent
+      REDIS_URL: redis://redis:6379
+      BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      BOT_LOCALE: fa
+      ADMIN_HOST: 0.0.0.0
+      ADMIN_PORT: "9090"
+      EITAA_TOKEN: ${EITAA_TOKEN}
+      RUBIKA_AUTH: ${RUBIKA_AUTH}
+      WEBHOOK_ENABLED: "1"
+      WEBHOOK_URL: ${WEBHOOK_URL}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET}
+      LOG_TO_STDOUT: "1"
+    ports: ["9090:9090", "9091:9091"]
+    volumes: [commerce_data:/app/data]
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes: [./nginx.conf:/etc/nginx/conf.d/default.conf:ro]
+    depends_on: [commerce-agent]
+volumes: {pgdata: {}, redis_data: {}, commerce_data: {}}
